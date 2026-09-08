@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-Immaculate SEO Bot - Ultra Premium Edition
-GitHub Actions + GitHub Pages uyumlu, sıfır hata odaklı
+Immaculate SEO Bot - Ultra Hyper Professional Edition
+Organik trafik odaklı • Sıfır hata • Production-ready
 """
 
 import os
 import sys
-import time
+import re
+import json
 import random
 import logging
-import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Dict, Optional
+from dataclasses import dataclass, asdict
 
 import requests
 import feedparser
@@ -27,13 +28,11 @@ DOCS_DIR = Path("docs")
 REPORT_FILE = DOCS_DIR / "latest-suggestion.md"
 INDEX_FILE = DOCS_DIR / "index.md"
 
-USER_AGENT = "ImmaculateSEOBot/3.0 (+https://github.com/yourusername/immaculate-seo-bot)"
-TIMEOUT = 20
-MAX_RETRIES = 4
+USER_AGENT = "ImmaculateSEOBot/4.0-Ultra (+https://github.com/xmifrmx/seo)"
+TIMEOUT = 25
+MAX_RETRIES = 5
 
-# IndexNow (Bing + Yandex + diğerleri)
-INDEXNOW_KEY = os.getenv("INDEXNOW_KEY", "")  # GitHub Secrets'a ekleyebilirsin
-INDEXNOW_KEY_LOCATION = f"{SITE_BASE}/{INDEXNOW_KEY}.txt" if INDEXNOW_KEY else ""
+INDEXNOW_KEY = os.getenv("INDEXNOW_KEY", "")
 
 # ====================== LOGGING ======================
 logging.basicConfig(
@@ -42,31 +41,39 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-logger = logging.getLogger("ImmaculateBot")
+logger = logging.getLogger("ImmaculateUltra")
+
+# ====================== DATA CLASSES ======================
+@dataclass
+class TopicSuggestion:
+    main_title: str
+    alternative_titles: List[str]
+    meta_description: str
+    target_keyword: str
+    secondary_keywords: List[str]
+    content_outline: List[str]
+    estimated_search_potential: str
+    internal_link_ideas: List[str]
 
 # ====================== SESSION ======================
 def create_session() -> requests.Session:
     session = requests.Session()
-    retry_strategy = Retry(
+    retry = Retry(
         total=MAX_RETRIES,
-        backoff_factor=1.5,
+        backoff_factor=1.8,
         status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET", "POST", "HEAD"]
+        allowed_methods=["GET", "POST"]
     )
-    adapter = HTTPAdapter(max_retries=retry_strategy)
+    adapter = HTTPAdapter(max_retries=retry)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
-    session.headers.update({
-        "User-Agent": USER_AGENT,
-        "Accept": "application/rss+xml, application/xml, text/xml, */*"
-    })
+    session.headers.update({"User-Agent": USER_AGENT})
     return session
 
 # ====================== SITEMAP & INDEXNOW ======================
-def ping_search_engines(session: requests.Session) -> Dict[str, str]:
+def notify_search_engines(session: requests.Session) -> Dict[str, str]:
     results = {}
 
-    # Klasik pingler (hala bazı motorlar dinliyor)
     pings = {
         "Google": f"https://www.google.com/ping?sitemap={SITEMAP_URL}",
         "Bing": f"https://www.bing.com/ping?sitemap={SITEMAP_URL}",
@@ -76,159 +83,248 @@ def ping_search_engines(session: requests.Session) -> Dict[str, str]:
     for name, url in pings.items():
         try:
             r = session.get(url, timeout=TIMEOUT)
-            results[name] = f"{r.status_code}"
-            logger.info(f"{name} ping → {r.status_code}")
+            results[name] = str(r.status_code)
+            logger.info(f"{name} → {r.status_code}")
         except Exception as e:
-            results[name] = f"Error: {str(e)[:80]}"
-            logger.warning(f"{name} ping failed: {e}")
+            results[name] = f"Error: {str(e)[:60]}"
+            logger.warning(f"{name} failed")
 
-    # IndexNow (modern ve önerilen yöntem)
     if INDEXNOW_KEY:
         try:
             payload = {
                 "host": "immaculate.tr",
                 "key": INDEXNOW_KEY,
-                "keyLocation": INDEXNOW_KEY_LOCATION,
-                "urlList": [SITEMAP_URL, f"{SITE_BASE}/"]
+                "keyLocation": f"{SITE_BASE}/{INDEXNOW_KEY}.txt",
+                "urlList": [SITEMAP_URL, SITE_BASE]
             }
             r = session.post("https://api.indexnow.org/indexnow", json=payload, timeout=TIMEOUT)
-            results["IndexNow"] = f"{r.status_code}"
+            results["IndexNow"] = str(r.status_code)
             logger.info(f"IndexNow → {r.status_code}")
         except Exception as e:
             results["IndexNow"] = f"Error: {e}"
-            logger.warning(f"IndexNow failed: {e}")
     else:
         results["IndexNow"] = "Skipped (no key)"
 
     return results
 
-# ====================== FEED & TOPIC ======================
-def get_feed_titles(session: requests.Session) -> List[str]:
+# ====================== FEED ======================
+def get_recent_titles(session: requests.Session) -> List[str]:
     try:
-        logger.info(f"Feed okunuyor: {FEED_URL}")
         resp = session.get(FEED_URL, timeout=TIMEOUT)
         resp.raise_for_status()
-
         feed = feedparser.parse(resp.content)
-        titles = []
 
-        for entry in feed.entries[:25]:
+        titles = []
+        for entry in feed.entries[:30]:
             title = entry.get("title", "").strip()
-            if title and len(title) > 12:
+            if title and len(title) > 15:
                 titles.append(title)
 
         if not titles:
-            # Fallback regex
-            import re
-            found = re.findall(r"<title[^>]*>([^<]+)</title>", resp.text, re.I)
-            titles = [t.strip() for t in found if len(t.strip()) > 15][:20]
+            # Fallback
+            titles = re.findall(r"<title[^>]*>([^<]{15,})<", resp.text, re.I)
+            titles = [t.strip() for t in titles][:20]
 
-        logger.info(f"{len(titles)} başlık alındı")
+        logger.info(f"Feed'den {len(titles)} başlık alındı")
         return titles
-
     except Exception as e:
         logger.error(f"Feed hatası: {e}")
         return []
 
-def generate_premium_suggestion(titles: List[str]) -> Dict[str, str]:
-    if not titles:
-        titles = [
-            "Samsung Galaxy S26 FE detaylı inceleme",
-            "Poco F9 Pro vs Ultra karşılaştırması",
-            "Xiaomi 18 Fold teknik analiz",
-            "iPhone 18 Pro Max renk ve kamera sızıntıları"
-        ]
-
-    selected = random.choice(titles)
-
-    templates = [
-        f"{selected} – 2026 Detaylı İnceleme ve Gerçek Kullanıcı Deneyimi",
-        f"{selected} Alınır mı? Tüm Artıları, Eksileri ve Alternatifler",
-        f"2026 Rehberi: {selected} Firmware, ROM ve Unlock İşlemleri",
-        f"{selected} Teknik Servis Notları ve Sık Karşılaşılan Sorunlar",
-        f"Yeni Nesil {selected} – Performans, Batarya ve Kamera Analizi",
-        f"{selected} için En İyi Aksesuar ve Optimizasyon Önerileri"
+# ====================== ULTRA TOPIC ENGINE ======================
+def generate_ultra_suggestion(existing_titles: List[str]) -> TopicSuggestion:
+    # Mobil / Teknik Servis odaklı yüksek potansiyelli kalıplar
+    high_potential_patterns = [
+        "{device} inceleme 2026",
+        "{device} alınır mı",
+        "{device} sorunları ve çözümleri",
+        "{device} batarya ömrü gerçek test",
+        "{device} vs rakip karşılaştırma",
+        "{device} firmware güncelleme rehberi",
+        "{device} teknik servis ücretleri",
+        "{device} ekran değişimi maliyeti",
+        "En iyi {category} telefonlar 2026",
+        "{device} kutu açılımı ve ilk izlenimler"
     ]
 
-    return {
-        "selected_from_feed": selected,
-        "suggested_title": random.choice(templates),
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    }
+    # Feed'den cihaz isimlerini çıkarmaya çalış
+    devices = []
+    for t in existing_titles:
+        # Basit cihaz yakalama
+        found = re.findall(r"(iPhone \d+|Galaxy S\d+|Galaxy A\d+|Poco [A-Z0-9]+|Xiaomi \d+|Redmi [A-Z0-9]+|Vivo [A-Z0-9]+|Oppo [A-Z0-9]+|Huawei [A-Z0-9 ]+)", t, re.I)
+        devices.extend(found)
+
+    devices = list(set(devices))[:8] or ["Samsung Galaxy S26 FE", "Poco F9 Pro", "Xiaomi 15T", "iPhone 17"]
+
+    selected_device = random.choice(devices)
+    pattern = random.choice(high_potential_patterns)
+    main_title = pattern.format(device=selected_device, category="orta segment")
+
+    # Alternatif başlıklar
+    alt_titles = [
+        f"{selected_device} 2026 Detaylı İnceleme – Alınır mı?",
+        f"{selected_device} Gerçek Kullanıcı Deneyimi ve Sorunları",
+        f"{selected_device} Batarya, Performans ve Kamera Testi",
+        f"{selected_device} Teknik Servis Rehberi ve Fiyatlar",
+        f"2026'da {selected_device} Hâlâ Mantıklı mı?"
+    ]
+
+    secondary = [
+        f"{selected_device} fiyat",
+        f"{selected_device} özellikler",
+        f"{selected_device} yorumlar",
+        f"{selected_device} sorunları",
+        "telefon teknik servis",
+        "ekran değişimi"
+    ]
+
+    outline = [
+        f"1. {selected_device} Genel Bakış ve Teknik Özellikler",
+        "2. Tasarım ve Malzeme Kalitesi",
+        "3. Ekran Deneyimi",
+        "4. Performans ve Günlük Kullanım",
+        "5. Batarya Ömrü Gerçek Test Sonuçları",
+        "6. Kamera Performansı (Gündüz + Gece)",
+        "7. Bilinen Sorunlar ve Çözümleri",
+        "8. Teknik Servis ve Yedek Parça Durumu",
+        "9. Rakip Modellerle Karşılaştırma",
+        "10. Kimler Almalı? Sonuç ve Tavsiye"
+    ]
+
+    internal_links = [
+        "Benzer incelemelere iç link verin",
+        "Teknik servis hizmet sayfanıza link verin",
+        "İlgili firmware / rom yazılarına link verin",
+        "Kategori sayfasına (Telefon İncelemeleri) link verin"
+    ]
+
+    return TopicSuggestion(
+        main_title=main_title,
+        alternative_titles=alt_titles,
+        meta_description=f"{selected_device} 2026 incelemesi: Batarya, kamera, performans ve bilinen sorunlar. Alınır mı? Gerçek kullanıcı deneyimi ve teknik servis bilgileri.",
+        target_keyword=selected_device.lower() + " inceleme",
+        secondary_keywords=secondary,
+        content_outline=outline,
+        estimated_search_potential="Orta-Yüksek (Cihaz popülerliğine göre)",
+        internal_link_ideas=internal_links
+    )
 
 # ====================== REPORT ======================
-def write_report(ping_results: Dict[str, str], suggestion: Dict[str, str]) -> None:
+def write_professional_report(ping_results: Dict[str, str], suggestion: TopicSuggestion) -> None:
     DOCS_DIR.mkdir(exist_ok=True)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    content = f"""# Immaculate SEO Bot – Günlük Rapor
+    content = f"""# Immaculate SEO Bot – Ultra Professional Raporu
 
-**Çalışma Zamanı:** {suggestion['generated_at']}
+**Tarih:** {now}  
+**Versiyon:** 4.0 Ultra Hyper Professional
 
 ---
 
-## Sitemap Bildirim Sonuçları
+## 1. Arama Motoru Bildirim Sonuçları
 
-| Motor       | Sonuç          |
-|-------------|----------------|
+| Motor       | Sonuç     | Durum |
+|-------------|-----------|-------|
 """
     for motor, result in ping_results.items():
-        content += f"| {motor:<11} | {result} |\n"
+        status = "✅" if result.startswith("200") or result == "202" else "⚠️"
+        content += f"| {motor:<11} | {result:<9} | {status} |\n"
 
     content += f"""
 ---
 
-## Bugünkü Konu Önerisi
+## 2. Bugünün Organik Trafik Odaklı Konu Önerisi
 
-**Feed’den seçilen mevcut konu:**  
-`{suggestion['selected_from_feed']}`
+### Ana Başlık (Önerilen)
+# {suggestion.main_title}
 
-**Önerilen yeni blog başlığı:**  
-### {suggestion['suggested_title']}
+### Alternatif Başlıklar
+"""
+    for i, title in enumerate(suggestion.alternative_titles, 1):
+        content += f"{i}. {title}\n"
+
+    content += f"""
+### Meta Description (150-160 karakter)
+`{suggestion.meta_description}`
+
+### Hedef Anahtar Kelime
+**{suggestion.target_keyword}**
+
+### İkincil Kelimeler
+"""
+    content += ", ".join(f"`{kw}`" for kw in suggestion.secondary_keywords)
+
+    content += f"""
+
+### Önerilen İçerik İskeleti (H2 Yapısı)
+"""
+    for item in suggestion.content_outline:
+        content += f"- {item}\n"
+
+    content += f"""
+### İç Linkleme Önerileri
+"""
+    for idea in suggestion.internal_link_ideas:
+        content += f"- {idea}\n"
+
+    content += f"""
+### Tahmini Arama Potansiyeli
+{suggestion.estimated_search_potential}
 
 ---
 
-*Bu rapor GitHub Actions tarafından otomatik üretilmiştir.*  
-*Bot Version: Ultra Premium 3.0*
+## 3. Uygulama Tavsiyesi (Organik Trafik İçin)
+
+1. Yukarıdaki ana başlığı veya alternatiflerden birini seç
+2. En az 1500-2000 kelimelik kaliteli içerik yaz
+3. Gerçek test sonuçları + ekran görüntüleri ekle
+4. Teknik servis sayfana ve benzer incelemelere iç link ver
+5. Yazıyı yayınladıktan sonra Google Search Console’dan “Dizin oluşturmayı iste”
+
+---
+
+*Bu rapor otomatik olarak üretilmiştir. Düzenli uygulama ile organik trafik artışı sağlanır.*
 """
 
     REPORT_FILE.write_text(content, encoding="utf-8")
-    logger.info(f"Rapor yazıldı → {REPORT_FILE}")
+    logger.info("Profesyonel rapor yazıldı")
 
-    # Ana sayfa da güncelle
-    index_content = f"""# Immaculate SEO Bot
+    # index.md güncelle
+    INDEX_FILE.write_text(f"""# Immaculate SEO Bot
 
-Günlük otomatik SEO & içerik öneri sistemi.
+**Ultra Hyper Professional Edition**
 
-**Son çalışma:** {suggestion['generated_at']}
+Son güncelleme: {now}
 
-[Güncel Öneri Raporunu Görüntüle](latest-suggestion.md)
-"""
-    INDEX_FILE.write_text(index_content, encoding="utf-8")
+→ [Bugünün Detaylı Konu Önerisini Gör](latest-suggestion.md)
+""", encoding="utf-8")
 
 # ====================== MAIN ======================
 def main() -> int:
-    logger.info("=" * 60)
-    logger.info("Immaculate SEO Bot – Ultra Premium başlatıldı")
-    logger.info("=" * 60)
+    logger.info("=" * 70)
+    logger.info("Immaculate SEO Bot 4.0 – Ultra Hyper Professional başlatıldı")
+    logger.info("=" * 70)
 
     session = create_session()
 
-    # 1. Sitemap bildir
-    ping_results = ping_search_engines(session)
+    # 1. Arama motorlarına bildir
+    ping_results = notify_search_engines(session)
 
-    # 2. Feed’den konu seç
-    titles = get_feed_titles(session)
-    suggestion = generate_premium_suggestion(titles)
+    # 2. Feed al
+    existing = get_recent_titles(session)
 
-    # 3. Rapor yaz
-    write_report(ping_results, suggestion)
+    # 3. Ultra öneri üret
+    suggestion = generate_ultra_suggestion(existing)
 
-    logger.info("Tüm işlemler başarıyla tamamlandı")
+    # 4. Rapor yaz
+    write_professional_report(ping_results, suggestion)
+
+    logger.info("Tüm işlemler başarıyla tamamlandı ✔")
     return 0
 
 if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as e:
-        logger.critical(f"Kritik hata: {e}", exc_info=True)
+        logger.critical(f"Kritik hata: {e}", exp_info=True)
         sys.exit(1)
